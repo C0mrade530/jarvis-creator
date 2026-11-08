@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file:; style-src 'self' file:; img-src 'self' file:; font-src 'self' file:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Jarvis Creator</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+  <script src="core-animation.js" defer></script>
+</head>
+<body class="idle">
+  <canvas id="field" aria-hidden="true"></canvas>
+  <div class="sweep" aria-hidden="true"></div>
+  <main id="stage">
+    <header class="masthead">
+      <div class="identity"><span class="mark" aria-hidden="true">J</span><span>JARVIS <small>CREATOR</small></span></div>
+      <div id="screenLabel" class="header-center">VOICE INTERFACE</div>
+      <div class="connection"><i></i><span id="connection">STANDBY</span><time id="clock"></time></div>
+    </header>
+    <section id="core" class="scene core-scene">
+      <div class="core-top"><span id="coreState">ОЖИДАЮ КОМАНДУ</span><span class="mono" id="coreCounter">00 : 00</span></div>
+      <div class="core-diag diag-left"><span>VOICE ENGINE</span><strong id="voiceProvider">SYSTEM</strong><div class="tiny-wave"></div><span>PROFILE</span><strong id="operatorName">НОВЫЙ АВТОР</strong></div>
+      <div class="core-diag diag-right"><span>ASSISTANT</span><strong id="assistantProvider">CODEX / CLAUDE</strong><div class="tiny-wave reverse"></div><span>DISPLAYS</span><strong id="displayCount">01</strong></div>
+      <div class="core-caption"><div class="voice-tag"><i></i><span id="voiceTag">СИСТЕМА ГОТОВА</span></div><div id="voiceBars" class="voice-bars" aria-hidden="true"></div></div>
+    </section>
+    <section id="left" class="scene content-scene">
+      <div class="section-heading"><h1>Статистика</h1><span class="live-label">COMPOSIO</span></div>
+      <div id="sideStats"></div>
+      <p id="sideStatsTime" class="muted"></p>
+    </section>
+    <section id="right" class="scene content-scene">
+      <div class="section-heading"><h1>Контент</h1><span class="live-label amber">CREATOR WORKSPACE</span></div>
+      <div id="sidePlan"></div>
+    </section>
+    <section id="combined" class="scene content-scene">
+      <div class="combined-panels">
+        <section><div class="section-heading"><h1>Статистика</h1><span class="live-label">COMPOSIO</span></div><div id="combinedStats"></div><p id="combinedTime" class="muted"></p></section>
+        <section><div class="section-heading"><h1>Контент</h1><span class="live-label amber">WORKSPACE</span></div><div id="combinedPlan"></div></section>
+      </div>
+    </section>
+  </main>
+
+  <aside id="singleDock" class="single-dock" aria-label="Статистика и контент" hidden>
+    <section><h2>Статистика</h2><div id="dockStats"></div></section>
+    <section><h2>Контент</h2><div id="dockPlan"></div></section>
+  </aside>
+
+  <aside id="controls" class="controls" aria-label="Пульт Jarvis">
+    <div class="control-title"><strong>Пульт Jarvis</strong><span id="nativeStatus"></span><button id="hideControls" aria-label="Скрыть пульт">×</button></div>
+      <div class="control-buttons">
+      <button class="primary" data-action="start">Утренний отчёт <kbd>Space</kbd></button>
+      <button data-action="prepare" title="Пересобрать озвучку после смены голоса или подключения">Обновить озвучку</button>
+      <button data-action="arm" id="armButton" aria-pressed="false">Включить хлопки</button>
+      <button data-action="reset">Сбросить <kbd>R</kbd></button>
+      <button id="swapDisplays" data-action="swap">Поменять экраны</button>
+      <button id="showAssistant">Спросить Jarvis</button>
+      <button id="showStats">Статистика</button>
+      <button id="showPlan">Контент</button>
+      <button id="showSettings">Настройки</button>
+    </div>
+    <div class="control-bottom">
+      <label>Чувствительность <input type="range" id="sensitivity" min="0.5" max="2" step="0.1" value="1" aria-label="Чувствительность хлопков"></label>
+      <div class="mic-meter" aria-hidden="true"><i id="micMeter"></i></div>
+      <span id="micStatus">Микрофон выключен</span>
+      <span class="exit-hint">C · пульт &nbsp; Esc · выйти из съёмки</span>
+    </div>
+    <p id="appStatus" class="control-note" role="status"></p>
+  </aside>
+  <button id="showControls" class="show-controls" aria-label="Показать пульт">Пульт · C</button>
+
+  <dialog id="settings" aria-labelledby="settingsTitle">
+    <div class="dialog-head"><span id="stepNumber" class="dialog-step"></span><button id="closeSettings" class="close" aria-label="Закрыть настройки">×</button></div>
+    <form id="settingsForm">
+      <fieldset data-step="0">
+        <legend id="settingsTitle">Как к тебе обращаться?</legend>
+        <p>Jarvis будет использовать это имя в утреннем отчёте.</p>
+        <label>Имя <input name="name" type="text" maxlength="80" autocomplete="given-name" placeholder="Как произнести имя"></label>
+      </fieldset>
+      <fieldset data-step="1" hidden>
+        <legend>Подключи свои соцсети</legend>
+        <p>Установи Composio CLI по инструкции в README и выполни <code>composio login</code>. Включай только те площадки, которые хочешь видеть.</p>
+        <div class="platform-option"><label><input name="instagram" type="checkbox"> Instagram</label><code>./jarvis connect instagram</code><p>Подойдёт аккаунт Creator или Business.</p></div>
+        <div class="platform-option"><label><input name="youtube" type="checkbox"> YouTube</label><code>./jarvis connect youtube</code><label>Channel ID <input name="youtube_channel_id" maxlength="80" placeholder="Если подключено несколько каналов"></label></div>
+        <div class="platform-option"><label><input name="telegram" type="checkbox"> Telegram</label><code>./jarvis connect telegram</code><label>Канал или ID <input name="telegram_chat_id" maxlength="80" placeholder="@канал или числовой ID"></label><p>Для счётчика участников добавь подключённого бота администратором канала.</p></div>
+        <p class="hint">Команды выполняются в папке Jarvis Creator. Доступ выдаётся на странице Composio. Можно пропустить этот шаг.</p>
+      </fieldset>
+      <fieldset data-step="2" hidden>
+        <legend>Выбери голос и помощника</legend>
+        <p>Системный голос Mac подойдёт для первого запуска. Для более естественной озвучки подключи ElevenLabs или запусти VoiceStudio на Mac с Apple Silicon.</p>
+        <label>Голос <select name="provider"><option value="system">Системный голос Mac</option><option value="elevenlabs">ElevenLabs</option><option value="voicestudio">VoiceStudio · локально</option></select></label>
+        <div id="voiceFields" hidden>
+          <ol><li>В ElevenLabs открой Developers → API Keys и создай ключ с доступом к Text to Speech.</li><li>В Voices открой меню выбранного голоса и скопируй Voice ID.</li><li>Вставь оба значения в поля ниже.</li></ol>
+          <label>Voice ID <input name="voice_id" type="text" maxlength="90" autocomplete="off"></label>
+          <label>API-ключ <input name="api_key" type="password" maxlength="256" autocomplete="off" spellcheck="false"></label>
+          <p id="keyStatus" class="hint"></p>
+          <button type="button" id="clearKey" hidden>Удалить сохранённый ключ</button>
+        </div>
+        <div id="localVoiceFields" hidden>
+          <p class="hint">Открой VoiceStudio, загрузи Supertonic 3 и запусти локальный API на порту 3900. Инструкция и ссылка есть в README.</p>
+          <label>Голос VoiceStudio <input name="local_voice_id" maxlength="2" autocomplete="off" placeholder="M1–M5 или F1–F5, по умолчанию M1"></label>
+        </div>
+        <label>Кто отвечает <select name="assistant_provider"><option value="auto">Автоматически</option><option value="codex">Codex</option><option value="claude">Claude Code</option></select></label>
+        <p class="hint">Войди в выбранном CLI на этом Mac. В режиме «Автоматически» Jarvis использует Codex, если он установлен, иначе Claude Code.</p>
+        <label>Режим разговора <select name="conversation_mode"><option value="turns">По очереди · выбранный голос</option><option value="gpt-live-1">GPT-Live 1 · можно перебивать</option></select></label>
+        <div id="openAIFields" hidden>
+          <p class="hint">Во время разговора GPT-Live получает звук микрофона и отвечает голосом OpenAI. Для сложных вопросов используется выбранный помощник. Сессия расходует баланс OpenAI API.</p>
+          <label>API-ключ OpenAI <input name="live_api_key" type="password" maxlength="256" autocomplete="off" spellcheck="false"></label>
+          <p id="openAIKeyStatus" class="hint"></p>
+          <button type="button" id="clearOpenAIKey" hidden>Удалить ключ OpenAI</button>
+        </div>
+      </fieldset>
+      <fieldset data-step="3" hidden>
+        <legend>Что ты хочешь снимать?</legend>
+        <label>Ниша, блог или бизнес <textarea name="niche" maxlength="600" rows="2" placeholder="О чём блог и чем ты занимаешься"></textarea></label>
+        <label>Аудитория <textarea name="audience" maxlength="600" rows="2" placeholder="Кому ты помогаешь и с какой задачей"></textarea></label>
+        <label>Цель <input name="goal" maxlength="600" placeholder="Например: объяснить продукт и получить заявки"></label>
+        <label>Формат <select name="format"><option value="mixed">Чередовать оба формата</option><option value="talking-head">Снимаю себя, Jarvis монтирует</option><option value="animated">Анимационные ролики</option></select></label>
+        <p id="formatHint" class="hint"></p>
+      </fieldset>
+      <p id="settingsError" class="control-note" role="status"></p>
+      <div class="dialog-actions"><button id="backStep" type="button">Назад</button><button id="nextStep" class="primary" type="submit">Дальше</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="assistant" aria-labelledby="assistantTitle">
+    <div class="dialog-head"><h2 id="assistantTitle">Спросить Jarvis</h2><button class="close" data-close="assistant" aria-label="Закрыть">×</button></div>
+    <p id="turnInfo" class="hint">После паузы Jarvis отвечает выбранным голосом и снова начинает слушать. Ответ готовит выбранный CLI.</p>
+    <p id="liveInfo" class="hint" hidden>GPT-Live слышит тебя во время ответа. Звук микрофона передаётся в OpenAI, а сложные вопросы — выбранному помощнику.</p>
+    <button type="button" id="assistantVoiceSettings">Настройки голоса</button>
+    <div id="liveTurns" class="conversation" hidden></div>
+    <p id="liveMhsLink" class="hint" hidden></p>
+    <div id="conversation" class="conversation" aria-live="polite"></div>
+    <form id="askForm">
+      <label>Вопрос <textarea id="question" name="question" rows="2" maxlength="3000" placeholder="О чём снять следующий ролик?"></textarea></label>
+      <div class="dialog-actions"><button id="liveConversation" type="button" aria-pressed="false">Начать разговор</button><button id="listenButton" type="button" aria-pressed="false">Одна реплика</button><button id="askButton" type="submit" class="primary">Спросить</button></div>
+      <p id="askStatus" class="control-note" role="status"></p>
+    </form>
+  </dialog>
+
+  <dialog id="details" aria-labelledby="detailsTitle">
+    <div class="dialog-head"><h2 id="detailsTitle"></h2><button class="close" data-close="details" aria-label="Закрыть">×</button></div>
+    <div id="detailBody"></div>
+    <div id="detailActions" class="dialog-actions"><button id="refreshStats" class="primary" type="button">Обновить статистику</button></div>
+    <p id="refreshStatus" class="hint" role="status"></p>
+  </dialog>
+</body>
+</html>

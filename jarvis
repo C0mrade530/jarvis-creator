@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+jarvis_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if ! command -v python3 >/dev/null 2>&1; then
+  printf '%s\n' 'Jarvis: установите Python 3.10 или новее и повторите команду.' >&2
+  exit 1
+fi
+exec python3 "$jarvis_dir/scripts/creator.py" "$@"
