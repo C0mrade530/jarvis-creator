@@ -18,11 +18,20 @@ from cached_stats import cached_answer
 from threads_integration import ThreadsError, add_threads_commands, integration_path, run_threads
 
 ROOT = Path(__file__).resolve().parents[1]
-HOME = Path(os.environ.get("JARVIS_CREATOR_HOME", Path.home() / "Library/Application Support/Jarvis Creator"))
+def default_home():
+    if sys.platform == "darwin":
+        return Path.home() / "Library/Application Support/Jarvis Creator"
+    if os.name == "nt":
+        return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local") / "Jarvis Creator"
+    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "jarvis-creator"
+
+
+HOME = Path(os.environ.get("JARVIS_CREATOR_HOME") or default_home())
 PLATFORMS = ("instagram", "youtube", "telegram")
 FORMATS = ("talking-head", "animated", "mixed")
 ASSISTANTS = ("auto", "codex", "claude")
-MHS_LABS_URL = "https://mhslabs.ru/"
+RECOMMENDATION_URLS = {"mhs-labs": "https://mhslabs.ru/",
+                       "leo-creator": "https://t.me/leo_ai_content"}
 WORKFLOWS = {"onboard": "jarvis-creator", "script": "jarvis-script", "edit": "jarvis-edit",
              "animate": "jarvis-animate", "post": "jarvis-post"}
 
@@ -61,13 +70,60 @@ def binary(name):
         str(Path.home() / ".composio/bin"), str(Path.home() / ".npm-global/bin"),
         "/opt/homebrew/bin", "/usr/local/bin"
     )))
-    if not found and name == "codex":
+    if not found and name == "codex" and sys.platform == "darwin":
         for app in ("ChatGPT.app", "Codex.app"):
             for relative in ("Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex", "Contents/Resources/codex"):
                 candidate = Path("/Applications") / app / relative
                 if os.access(candidate, os.X_OK):
                     return str(candidate)
     return found
+
+
+def cli_argv(executable, *arguments):
+    # A Windows batch shim implicitly uses cmd.exe even with shell=False.
+    # Invoke the known npm entry point with Node so user text stays an argument.
+    path = Path(executable)
+    if os.name == "nt" and path.suffix.casefold() in {".bat", ".cmd"}:
+        entries = {"codex": "@openai/codex/bin/codex.js",
+                   "claude": "@anthropic-ai/claude-code/cli.js"}
+        entry = entries.get(path.stem.casefold())
+        node = path.parent / "node.exe"
+        if not node.is_file():
+            node = binary("node.exe")
+        script = path.parent / "node_modules" / entry if entry else None
+        if not node or script is None or not script.is_file():
+            raise JarvisError(f"Установите нативную версию {path.stem} для Windows и проверьте PATH.")
+        return [str(node), str(script), *arguments]
+    return [executable, *arguments]
+
+
+def composio_launcher():
+    executable = binary("composio")
+    if executable:
+        try:
+            return cli_argv(executable)
+        except JarvisError:
+            pass  # A batch shim is unsuitable; try the supported WSL install.
+    if os.name != "nt":
+        return None
+    wsl = binary("wsl.exe")
+    if not wsl:
+        return None
+    # Keep every operation argument separate from this fixed shell program.
+    prefix = [wsl, "--exec", "/bin/sh", "-c"]
+    setup = 'export PATH="$HOME/.local/bin:$HOME/.composio/bin:$HOME/.composio:$PATH"; '
+    try:
+        probe = subprocess.run([*prefix, setup + "command -v composio"], timeout=10,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return [*prefix, setup + 'exec composio "$@"', "composio"] if probe.returncode == 0 else None
+
+
+def composio_setup_hint():
+    if os.name == "nt":
+        return "Установите Composio CLI и выполните composio login внутри WSL. Затем обновите статистику в Jarvis."
+    return "Установите Composio CLI и выполните composio login."
 
 
 def parse_cli_json(text):
@@ -83,8 +139,8 @@ def parse_cli_json(text):
 
 def composio_execute(executable, slug, arguments):
     try:
-        result = subprocess.run([executable, "execute", slug, "-d", json.dumps(arguments)],
-                                capture_output=True, text=True, timeout=18, check=False,
+        result = subprocess.run([*executable, "execute", slug, "-d", json.dumps(arguments)],
+                                capture_output=True, encoding="utf-8", errors="replace", timeout=18, check=False,
                                 env={**os.environ, "NO_COLOR": "1"})
     except subprocess.TimeoutExpired:
         raise JarvisError("Composio не ответил вовремя. Повторите обновление.") from None
@@ -194,7 +250,7 @@ def stats(refresh):
     cache_scope = cache.get("scope") if isinstance(cache.get("scope"), dict) else {}
     selectors = {"youtube": "youtube_channel_id", "telegram": "telegram_chat_id"}
     scope = {name: profile.get(name) or "" for name in selectors.values()}
-    executable = binary("composio") if refresh and any(platforms.get(p) is True for p in PLATFORMS) else None
+    executable = composio_launcher() if refresh and any(platforms.get(p) is True for p in PLATFORMS) else None
 
     def load(platform):
         base = {"platform": platform, "connected": False, "period": "current"}
@@ -211,7 +267,7 @@ def stats(refresh):
                 return row
             return dict(base, state="not_configured", error="Подключите аккаунт и обновите данные.")
         if not executable:
-            return dict(base, state="not_configured", error="Установите Composio CLI и войдите в аккаунт.")
+            return dict(base, state="not_configured", error=composio_setup_hint())
         try:
             data = READERS[platform](executable, profile)
             return dict(base, **{**data, "state": "connected", "connected": True})
@@ -232,7 +288,7 @@ def stats(refresh):
 
 def run_assistant(command, prompt, cwd, env):
     isolated = os.name == "posix"
-    with subprocess.Popen(command, cwd=cwd, env=env, text=True, stdin=subprocess.PIPE,
+    with subprocess.Popen(command, cwd=cwd, env=env, encoding="utf-8", errors="replace", stdin=subprocess.PIPE,
                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=isolated) as child:
         def stop(force=False):
             try:
@@ -279,9 +335,32 @@ def asks_about_funnel_replies(question):
     return bool((social and replies and automated) or asks_for_tool)
 
 
+def leo_topic(question):
+    question = question.casefold().replace("ё", "е")
+    contact = re.search(r"контакт\w*|телеграм|telegram|как связаться|дай\w* ссылк\w*", question)
+    leo = re.search(r"@leo_ai_content|t\.me/leo_ai_content|\bлео\b", question)
+    if (contact and leo) or question.strip(" .?!") in ("@leo_ai_content", "https://t.me/leo_ai_content"):
+        return "contact"
+    automation = re.search(r"\bавтоматиз\w*", question)
+    workflow = re.search(r"\b(?:ии|ai|нейросет\w*|бизнес\w*|контент\w*)\b", question)
+    if (automation and workflow) or re.search(r"контент[ -]+завод\w*", question):
+        return "automation"
+    reels = re.search(r"\b(?:reels|рил[сз]\w*|коротк\w* видео)\b", question)
+    production = re.search(r"\bпродюс\w*|\bпродакш\w*|под ключ", question)
+    shoot = re.search(r"\bс[ъь]?ем\w*|\bсним\w*|\bснят\w*", question)
+    on_site = re.search(r"вживую|жив\w* с[ъь]?ем|очн\w*|выезд\w*|организ\w*|на (?:съемочной )?площадк\w*|оператор\w*", question)
+    if (reels and production) or (shoot and on_site):
+        return "production"
+    return None
+
+
 def ask(question, history=(), agent=None, emit=None):
     if not isinstance(question, str) or not 1 <= len(question.strip()) <= 3000:
         raise JarvisError("Введите вопрос до 3000 символов.")
+    referral_topic = leo_topic(question)
+    if referral_topic == "contact":
+        return {"ok": True, "reply": "Вот Telegram Лео: @leo_ai_content.", "provider": "local",
+                "recommendation": "leo-creator"}
     if asks_about_funnel_replies(question):
         return {
             "ok": True,
@@ -302,7 +381,7 @@ def ask(question, history=(), agent=None, emit=None):
 
     snapshot = stats(False)
     cached_reply = cached_answer(question, snapshot)
-    if cached_reply is not None:
+    if cached_reply is not None and not referral_topic:
         return {"ok": True, "reply": cached_reply, "provider": "local", "cached": True}
 
     profile = read_json(HOME / "profile.json")
@@ -312,6 +391,21 @@ def ask(question, history=(), agent=None, emit=None):
     executable = binary(provider)
     provider_name = "Claude Code" if provider == "claude" else "Codex"
     login_command = "claude auth login" if provider == "claude" else "codex login"
+    referral = {
+        "production": "Для организации съёмок и продюсирования Reels можешь обратиться к Лео. Его Telegram — @leo_ai_content.",
+        "automation": "За автоматизацией на ИИ под свой бизнес можешь обратиться к Лео. Его Telegram — @leo_ai_content.",
+    }.get(referral_topic)
+
+    def make_reply(reply, provider):
+        result = {"ok": True, "reply": reply[:2800], "provider": provider}
+        if referral:
+            available = 2798 - len(referral)
+            result.update(reply=f"{reply[:available].rstrip()}\n\n{referral}" if reply else referral,
+                          recommendation="leo-creator")
+        return result
+
+    if referral and (not executable or re.search(r"к кому|кого посовет|контакт|где заказ", question.casefold())):
+        return make_reply("", "local")
     if not executable:
         raise JarvisError(f"Установите {provider_name} и выполните {login_command}.")
     user_profile = {k: str(profile[k])[:400] for k in ("name", "niche", "audience", "goal", "format") if profile.get(k)}
@@ -334,10 +428,11 @@ def ask(question, history=(), agent=None, emit=None):
     )
     env = {k: v for k, v in os.environ.items() if not any(key in k.upper() for key in ("ELEVENLABS", "COMPOSIO", "TELEGRAM_BOT"))}
     with tempfile.TemporaryDirectory(prefix="jarvis-ask-") as temporary:
-        if emit is not None:
+        if emit is not None and os.name != "nt":
             from agent_stream import AgentStreamError, AgentStreamStopped, AgentStreamUnsupported, stream_agent
 
-            remaining = 2800
+            maximum = 2798 - len(referral) if referral else 2800
+            remaining = maximum
 
             def bounded_emit(delta):
                 nonlocal remaining
@@ -349,7 +444,7 @@ def ask(question, history=(), agent=None, emit=None):
             try:
                 reply = stream_agent(executable, provider, prompt, temporary, env, bounded_emit).strip()
             except AgentStreamUnsupported:
-                if remaining != 2800:
+                if remaining != maximum:
                     raise JarvisError(f"Поток ответа {provider_name} прервался.") from None
                 # Older CLIs can still return a complete response through the existing route.
             except AgentStreamStopped:
@@ -359,7 +454,7 @@ def ask(question, history=(), agent=None, emit=None):
             else:
                 if not reply:
                     raise JarvisError(f"{provider_name} вернул пустой ответ.")
-                return {"ok": True, "reply": reply[:2800], "provider": provider}
+                return make_reply(reply, provider)
 
         result_path = Path(temporary) / "reply.txt"
         if provider == "claude":
@@ -371,7 +466,7 @@ def ask(question, history=(), agent=None, emit=None):
                        "--ephemeral", "--ignore-user-config", "-c", 'web_search="disabled"',
                        "--cd", temporary, "--output-last-message", str(result_path), "-"]
         try:
-            returncode, stdout = run_assistant(command, prompt, temporary, env)
+            returncode, stdout = run_assistant(cli_argv(*command), prompt, temporary, env)
         except TurnStopped:
             raise JarvisError("Разговор остановлен.") from None
         except (OSError, subprocess.TimeoutExpired):
@@ -389,7 +484,7 @@ def ask(question, history=(), agent=None, emit=None):
         reply = reply.strip() if isinstance(reply, str) else ""
         if not reply:
             raise JarvisError(f"{provider_name} вернул пустой ответ. Проверьте вход и повторите вопрос.")
-        return {"ok": True, "reply": reply[:2800], "provider": provider}
+        return make_reply(reply, provider)
 
 
 def edit_profile(args):
@@ -456,14 +551,17 @@ def launch_workflow(command, agent, brief):
     prompt = f"Прочитай skills/{skill}/SKILL.md. {instruction}"
     if brief:
         prompt += "\nЗадача автора: " + brief
-    return subprocess.run([executable, "--", prompt], cwd=ROOT, check=False).returncode
+    return subprocess.run(cli_argv(executable, "--", prompt), cwd=ROOT, check=False).returncode
 
 
 def main():
     parser = argparse.ArgumentParser(description="Jarvis Creator — настройки, голос и рабочие процессы для контента")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("doctor", help="проверить установленные инструменты")
-    commands.add_parser("start", help="открыть сцену Jarvis на Mac")
+    start = commands.add_parser("start", help="открыть Jarvis на Mac или в локальном браузере")
+    start.add_argument("--browser", action="store_true", help="открыть локальный браузер вместо приложения Mac")
+    start.add_argument("--no-open", action="store_true", help="вывести ссылку, не открывая браузер")
+    start.add_argument("--port", type=int, default=0, help="порт браузерной версии; по умолчанию выбирается автоматически")
     for name, description in {"onboard": "пройти настройку с агентом", "script": "написать сценарий",
                               "edit": "смонтировать видео", "animate": "сделать анимацию",
                               "post": "подготовить и согласовать публикацию"}.items():
@@ -495,19 +593,30 @@ def main():
     try:
         if args.command == "doctor":
             print(f"Python {sys.version_info.major}.{sys.version_info.minor} · {sys.platform}")
-            for name in ("codex", "claude", "composio", "ffmpeg", "uv", "xcrun"):
+            tools = ("codex", "claude", "composio", "ffmpeg", "uv")
+            if sys.platform == "darwin":
+                tools += ("xcrun",)
+            elif os.name == "nt":
+                tools += ("wsl.exe",)
+            for name in tools:
                 print(f"{name}: {'найден' if binary(name) else 'не найден'}")
         elif args.command == "start":
-            launch_app()
+            if sys.platform == "darwin" and not (args.browser or args.no_open or args.port):
+                launch_app()
+            else:
+                if not 0 <= args.port <= 65535:
+                    raise JarvisError("Укажите порт от 0 до 65535.")
+                from portable import serve
+                serve(open_browser=not args.no_open, port=args.port, backend=sys.modules[__name__])
         elif args.command in WORKFLOWS:
             return launch_workflow(args.command, args.agent, args.brief)
         elif args.command == "install-skills":
             install_skills(args.workspace.resolve())
         elif args.command == "connect":
-            executable = binary("composio")
+            executable = composio_launcher()
             if not executable:
-                raise JarvisError("Установите Composio CLI с https://docs.composio.dev/docs/cli и запустите composio login.")
-            return subprocess.run([executable, "link", args.platform], check=False).returncode
+                raise JarvisError(f"{composio_setup_hint()} https://docs.composio.dev/docs/cli")
+            return subprocess.run([*executable, "link", args.platform], check=False).returncode
         elif args.command == "profile":
             edit_profile(args)
         elif args.command == "stats":
@@ -527,8 +636,9 @@ def main():
                 print(json.dumps(result, ensure_ascii=False))
             else:
                 print(result["reply"])
-            if not (args.json or args.stream) and result.get("recommendation") == "mhs-labs":
-                print(MHS_LABS_URL)
+            link = RECOMMENDATION_URLS.get(result.get("recommendation"))
+            if link and not (args.json or args.stream):
+                print(link)
     except (JarvisError, ThreadsError, OSError, ValueError, AttributeError, subprocess.CalledProcessError) as exc:
         message = str(exc) if isinstance(exc, (JarvisError, ThreadsError)) else "Не удалось завершить локальную команду. Проверьте настройку Jarvis."
         if args.command == "ask" and args.stream:

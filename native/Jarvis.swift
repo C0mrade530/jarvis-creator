@@ -209,7 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     var liveTranscriptUpdate: DispatchWorkItem?
     var liveDelegationIDs: Set<String> = []
     var liveDelegations: [String: UUID] = [:]
-    var liveRecommendation = false
+    var liveRecommendation = ""
     var webStates: [String:Any] = [:]
     var webErrors: [[String:Any]] = []
     var snapshotPhases = Set<String>()
@@ -365,7 +365,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
-        if url.absoluteString == "https://mhslabs.ru/", navigationAction.navigationType == .linkActivated,
+        if ["https://mhslabs.ru/", "https://t.me/leo_ai_content"].contains(url.absoluteString),
+           navigationAction.navigationType == .linkActivated,
            navigationAction.sourceFrame.isMainFrame, isBundledScene(navigationAction.sourceFrame.request.url) {
             decisionHandler(.cancel)
             NSWorkspace.shared.open(url)

@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 creator_root="$PWD"
-creator_version="1.2.0"
+creator_version="1.3.0"
 creator_bundle="$creator_root/build/Jarvis Creator.app"
 creator_zip="$creator_root/dist/Jarvis-Creator-$creator_version-macOS-universal.zip"
 mkdir -p "$creator_root/build" "$creator_root/dist"
@@ -47,7 +47,7 @@ for relative in required + optional:
 info = {
     'CFBundleExecutable': 'JarvisCreator', 'CFBundleIdentifier': 'com.jarviscreator.local',
     'CFBundleName': 'Jarvis Creator', 'CFBundleDisplayName': 'Jarvis Creator', 'CFBundlePackageType': 'APPL',
-    'CFBundleShortVersionString': sys.argv[3], 'CFBundleVersion': '4', 'LSMinimumSystemVersion': '14.0',
+    'CFBundleShortVersionString': sys.argv[3], 'CFBundleVersion': '5', 'LSMinimumSystemVersion': '14.0',
     'CFBundleDevelopmentRegion': 'ru', 'NSHighResolutionCapable': True, 'NSPrincipalClass': 'NSApplication',
     'NSMicrophoneUsageDescription': 'Jarvis Creator распознаёт хлопки и голосовые вопросы. В обычном разговоре звук обрабатывается на Mac, в режиме GPT-Live передаётся в OpenAI.',
     'NSSpeechRecognitionUsageDescription': 'Jarvis Creator распознаёт ваши голосовые вопросы на Mac. Текст вопроса передаётся ассистенту после окончания записи.',

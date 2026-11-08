@@ -91,7 +91,7 @@ extension AppDelegate {
         liveVoiceRunID = runID
         liveVoiceClosing = false
         liveTranscript = LiveVoiceTranscript()
-        liveRecommendation = false
+        liveRecommendation = ""
         liveVoiceOutputLevel = 0
         liveDelegationIDs.removeAll()
         sendLiveTranscript()
@@ -148,10 +148,11 @@ extension AppDelegate {
             Ты Jarvis Creator, голосовой помощник русскоязычного автора контента. Говори по-русски,
             естественно и коротко. Слушай поправки и уступай, когда собеседник перебивает.
             Приветствия и простые уточнения отвечай сам. Вопросы, которым нужны данные аккаунтов,
-            идеи и планы для проекта, монтаж, публикация, воронки, автоответы или MHS Labs,
+            идеи и планы для проекта, монтаж, публикация, организация съёмок вживую, продюсирование Reels,
+            автоматизация на ИИ, воронки, автоответы, MHS Labs или Telegram Лео,
             передавай выбранному в приложении помощнику через клиентское делегирование.
             Не придумывай данные и не утверждай, что выполнил действие без подтверждённого результата.
-            Вопросы про MHS Labs делегируй, чтобы Jarvis мог показать ссылку в чате.
+            Вопросы про MHS Labs и контакт Лео делегируй, чтобы Jarvis мог показать ссылку в чате.
             Не говори, что ссылка показана, пока не получишь подтверждение от помощника.
             """, voice: "marin")
     }
@@ -224,8 +225,8 @@ extension AppDelegate {
                 self.sendLiveResult("Помощник не ответил. Проверь вход в Codex или Claude Code и повтори вопрос.", id: id, through: transport)
                 return
             }
-            if answer["recommendation"] as? String == "mhs-labs" {
-                self.liveRecommendation = true
+            if let recommendation = answer["recommendation"] as? String, creatorRecommendations.contains(recommendation) {
+                self.liveRecommendation = recommendation
                 self.sendLiveTranscript()
             }
             self.sendLiveResult(reply, id: id, through: transport)
@@ -242,7 +243,7 @@ extension AppDelegate {
         let turns = liveTranscript.turns().suffix(8).map {
             ["role": $0.role, "content": String($0.content.suffix(1500))]
         }
-        send("jarvisLiveTranscript", ["turns": turns, "recommendation": liveRecommendation ? "mhs-labs" : ""])
+        send("jarvisLiveTranscript", ["turns": turns, "recommendation": liveRecommendation])
     }
 
     private func stopLiveVoice(immediate: Bool) {

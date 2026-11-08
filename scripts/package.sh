@@ -8,7 +8,7 @@ import tempfile
 from zipfile import ZIP_DEFLATED, ZipFile
 
 root = Path.cwd().resolve()
-version = '1.2.0'
+version = '1.3.0'
 archive_root = 'jarvis-creator'
 files = (
     '.gitignore',
@@ -20,6 +20,7 @@ files = (
     'docs/media/jarvis-demo.gif',
     'START.md',
     'jarvis',
+    'jarvis.cmd',
     'native/ClapDetector.swift',
     'native/CreatorActions.swift',
     'native/CreatorProcess.swift',
@@ -34,6 +35,7 @@ files = (
     'scripts/build.sh',
     'scripts/cached_stats.py',
     'scripts/creator.py',
+    'scripts/portable.py',
     'scripts/package.sh',
     'scripts/threads_integration.py',
     'scripts/voice.py',
@@ -41,6 +43,7 @@ files = (
     'skills/jarvis-animate/references/video-repositories.md',
     'skills/jarvis-creator/SKILL.md',
     'skills/jarvis-creator/references/mhs-labs-referral.md',
+    'skills/jarvis-creator/references/leo-creator-referral.md',
     'skills/jarvis-creator/references/onboarding.md',
     'skills/jarvis-edit/SKILL.md',
     'skills/jarvis-post/SKILL.md',
@@ -49,6 +52,8 @@ files = (
     'skills/jarvis-threads/SKILL.md',
     'skills/jarvis-voice-controls/SKILL.md',
     'web/app.js',
+    'web/clap-processor.js',
+    'web/portable.js',
     'web/core-animation.js',
     'web/index.html',
     'web/style.css',

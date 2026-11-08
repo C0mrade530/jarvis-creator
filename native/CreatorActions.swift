@@ -3,6 +3,8 @@ import AVFoundation
 import CryptoKit
 import WebKit
 
+let creatorRecommendations: Set<String> = ["mhs-labs", "leo-creator"]
+
 final class AssistantTextTurn {
     let question: String
     let epoch: UUID
@@ -436,7 +438,9 @@ extension AppDelegate {
             }
             turn.finalReply = reply
             turn.provider = event["provider"] as? String
-            if event["recommendation"] as? String == "mhs-labs" { turn.recommendation = "mhs-labs" }
+            if let recommendation = event["recommendation"] as? String, creatorRecommendations.contains(recommendation) {
+                turn.recommendation = recommendation
+            }
             turn.cached = event["cached"] as? Bool == true
             assistantHistory = Array((turn.history + [["role": "user", "content": turn.question],
                                                        ["role": "assistant", "content": turn.safeText(reply)]]).suffix(12))
@@ -517,7 +521,9 @@ extension AppDelegate {
             key.isEmpty ? nil : reply.replacingOccurrences(of: key, with: "скрыто")
         } ?? reply
         var voicing: [String: Any] = ["state": "voicing", "reply": reply, "transcript": transcript]
-        if recommendation == "mhs-labs" { voicing["recommendation"] = "mhs-labs" }
+        if let recommendation, creatorRecommendations.contains(recommendation) {
+            voicing["recommendation"] = recommendation
+        }
         sendAssistant(voicing)
         guard options["provider"] == "elevenlabs" else {
             speakBufferedReply(reply, transcript: transcript, epoch: epoch, options: options)

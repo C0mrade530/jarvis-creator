@@ -4,7 +4,8 @@ const $ = id => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const roles = {core: 'VOICE INTERFACE', left: 'SOCIAL ANALYTICS', right: 'CREATOR WORKSPACE', combined: 'CREATOR OVERVIEW'};
 const role = Object.hasOwn(roles, params.get('role')) ? params.get('role') : 'core';
-const native = Boolean(window.webkit?.messageHandlers?.jarvis);
+const portable = window.jarvisPortable;
+const native = Boolean(portable || window.webkit?.messageHandlers?.jarvis);
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value));
 const ease = value => 1 - (1 - clamp(value)) ** 3;
@@ -42,12 +43,15 @@ let pendingSave = null;
 let assistantState = 'ready';
 let conversationActive = false;
 let liveTurns = [];
-let liveRecommendation = false;
+let liveRecommendation = '';
 let history = [];
 let currentQuestion = '';
 let currentReply = '';
 let currentRecommendation = '';
-const mhsLabsURL = 'https://mhslabs.ru/';
+const recommendations = {
+  'mhs-labs': ['Открыть MHS Labs', 'https://mhslabs.ru/'],
+  'leo-creator': ['Написать Лео · @leo_ai_content', 'https://t.me/leo_ai_content'],
+};
 
 document.body.dataset.role = role;
 document.body.classList.toggle('side', role !== 'core');
@@ -69,9 +73,15 @@ function element(tag, value, className) {
   return node;
 }
 
-function mhsLabsLink() {
-  const link = element('a', 'Открыть MHS Labs', 'resource-link');
-  link.href = mhsLabsURL;
+function recommendationLink(key) {
+  if (!Object.hasOwn(recommendations, key)) return null;
+  const [label, url] = recommendations[key];
+  const link = element('a', label, 'resource-link');
+  link.href = url;
+  if (window.jarvisPortable) {
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+  }
   return link;
 }
 
@@ -79,7 +89,8 @@ function send(action, value) {
   if (native) {
     const message = {action};
     if (value !== undefined) message.value = value;
-    window.webkit.messageHandlers.jarvis.postMessage(message);
+    if (portable) void portable.postMessage(message);
+    else window.webkit.messageHandlers.jarvis.postMessage(message);
   } else {
     write($('appStatus'), 'Для запуска откройте локальное приложение Jarvis Creator.');
   }
@@ -117,7 +128,7 @@ window.jarvisNative = data => {
   $('swapDisplays').hidden = !(state.canSwapDisplays ?? state.screenCount >= 3);
   const t = Math.floor(state.elapsed || 0);
   write($('coreCounter'), [Math.floor(t / 60), t % 60].map(x => String(x).padStart(2, '0')).join(' : '));
-  write($('nativeStatus'), native ? `${state.screenCount} экр. · ${state.filming ? 'съёмка' : 'готов к работе'}` : 'Локальный предпросмотр');
+  write($('nativeStatus'), portable ? 'Локальный режим в браузере' : native ? `${state.screenCount} экр. · ${state.filming ? 'съёмка' : 'готов к работе'}` : 'Локальный предпросмотр');
   write($('armButton'), state.armed ? 'Выключить хлопки' : 'Включить хлопки');
   $('armButton').setAttribute('aria-pressed', String(Boolean(state.armed)));
   write($('micStatus'), state.micStatus || 'Микрофон выключен');
@@ -171,7 +182,8 @@ function updateVoiceFields() {
   $('voiceFields').hidden = provider !== 'elevenlabs';
   $('localVoiceFields').hidden = provider !== 'voicestudio';
   $('clearKey').hidden = !profile.voice?.has_api_key;
-  write($('keyStatus'), profile.voice?.has_api_key ? 'Ключ сохранён в Связке ключей Mac.' : 'Ключ хранится в Связке ключей Mac.');
+  write($('keyStatus'), portable ? 'Jarvis держит ключ в памяти до закрытия локального сервера.'
+    : profile.voice?.has_api_key ? 'Ключ сохранён в Связке ключей Mac.' : 'Ключ хранится в Связке ключей Mac.');
   $('openAIFields').hidden = fields.namedItem('conversation_mode').value !== 'gpt-live-1';
   $('clearOpenAIKey').hidden = !profile.has_openai_key;
   write($('openAIKeyStatus'), profile.has_openai_key ? 'Ключ сохранён в Связке ключей Mac.' : 'Нужен ключ от OpenAI API. Jarvis сохранит его в Связке ключей Mac.');
@@ -222,6 +234,11 @@ window.jarvisProfile = data => {
   }
 };
 
+if (portable) {
+  portable.getHistory = () => history;
+  portable.profileError = error => window.jarvisProfile({...profile, error});
+}
+
 form.addEventListener('submit', event => {
   event.preventDefault();
   if (pendingSave) return;
@@ -241,7 +258,7 @@ form.addEventListener('submit', event => {
     const apiKey = value('api_key');
     const voiceID = provider === 'voicestudio' ? value('local_voice_id') : value('voice_id');
     if (provider === 'elevenlabs' && (!voiceID || (!apiKey && !profile.voice?.has_api_key))) {
-      write($('settingsError'), 'Введи ключ и Voice ID или выбери системный голос Mac.');
+      write($('settingsError'), portable ? 'Введи ключ и Voice ID или выбери системный голос.' : 'Введи ключ и Voice ID или выбери системный голос Mac.');
       return;
     }
     if (provider === 'voicestudio' && voiceID && !/^[mf][1-5]$/i.test(voiceID)) {
@@ -322,9 +339,11 @@ function renderPlan(target) {
   target.replaceChildren(element('p', format, 'plan-lead'), list);
   if (target === $('detailBody')) {
     const resource = element('p', 'Автоответы для воронок · ', 'hint');
-    resource.appendChild(mhsLabsLink());
+    resource.appendChild(recommendationLink('mhs-labs'));
     const threads = element('details');
-    const setup = element('p', 'В исходной папке Jarvis выполни команды по порядку. Upload-Post выдаст ссылку для входа в свой аккаунт Threads.');
+    const windows = portable?.command.endsWith('.cmd');
+    const terminal = windows ? 'Открой папку Jarvis в WSL2. ' : '';
+    const setup = element('p', terminal + 'Выполни команды по порядку. Upload-Post выдаст ссылку для входа в свой аккаунт Threads.');
     const commands = element('pre');
     commands.appendChild(element('code', './jarvis threads install\n./jarvis threads setup\n./jarvis threads run\n# В другом терминале\n./jarvis threads chat'));
     threads.append(element('summary', 'Автопостинг в Threads'), setup, commands);
@@ -350,7 +369,7 @@ window.jarvisStats = data => {
 
 window.jarvisPrepared = data => {
   const status = {preparing: 'Готовлю озвучку отчёта…', ready: 'Озвучка готова.'};
-  write($('appStatus'), data.error || data.fallbackReason || status[data.state] || '');
+  write($('appStatus'), data.error || voiceFallbackMessages[data.fallbackReason] || data.fallbackReason || status[data.state] || '');
   if (data.provider) write($('voiceProvider'), voiceNames[data.provider] || voiceNames.system);
 };
 
@@ -372,7 +391,8 @@ function showConversation() {
   $('conversation').replaceChildren(...turns.slice(-8).map(turn => {
     const line = element('p');
     line.append(element('strong', turn.role === 'user' ? 'Ты · ' : 'Jarvis · '), document.createTextNode(turn.content));
-    if (turn.recommendation === 'mhs-labs') line.append(element('br'), mhsLabsLink());
+    const link = recommendationLink(turn.recommendation);
+    if (link) line.append(element('br'), link);
     return line;
   }));
   $('conversation').scrollTop = $('conversation').scrollHeight;
@@ -382,16 +402,18 @@ function updateConversationMode() {
   const usesLive = profile.conversation_mode === 'gpt-live-1';
   $('turnInfo').hidden = usesLive;
   $('liveInfo').hidden = !usesLive;
-  $('listenButton').hidden = usesLive;
+  $('listenButton').hidden = usesLive || Boolean(portable && !portable.canListen);
   $('conversation').hidden = usesLive && conversationActive;
   $('liveTurns').hidden = !usesLive || !liveTurns.length;
-  $('liveMhsLink').hidden = !usesLive || !liveRecommendation;
+  $('liveReferralLink').hidden = !usesLive || !liveRecommendation;
 }
 
 window.jarvisLiveTranscript = data => {
   if (role !== 'core') return;
   liveTurns = Array.isArray(data.turns) ? data.turns : [];
-  liveRecommendation = data.recommendation === 'mhs-labs';
+  const link = recommendationLink(data.recommendation);
+  liveRecommendation = link ? data.recommendation : '';
+  $('liveReferralLink').replaceChildren(...(link ? [link] : []));
   const pane = $('liveTurns');
   pane.replaceChildren(...liveTurns.map(turn => {
     const line = element('p');
@@ -428,7 +450,7 @@ window.jarvisAssistant = data => {
     $('question').value = '';
   }
   if (data.reply) currentReply = data.reply;
-  if (data.recommendation === 'mhs-labs') currentRecommendation = data.recommendation;
+  if (Object.hasOwn(recommendations, data.recommendation)) currentRecommendation = data.recommendation;
   if (data.state === 'ready' || data.state === 'error') {
     if (currentQuestion) history.push({role: 'user', content: currentQuestion});
     if (currentReply) history.push({role: 'assistant', content: currentReply, recommendation: currentRecommendation});
@@ -470,7 +492,6 @@ $('assistantVoiceSettings').onclick = () => {
   $('assistant').close();
   openSettings(2);
 };
-$('liveMhsLink').appendChild(mhsLabsLink());
 $('assistant').addEventListener('close', () => {
   if (conversationActive || !['ready', 'error'].includes(assistantState)) send('conversation-stop');
 });
